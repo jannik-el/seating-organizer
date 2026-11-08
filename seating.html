@@ -91,6 +91,11 @@ details.box > summary .count { color: var(--muted); font-weight: 400; margin-lef
 .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .row > .grow { flex: 1; min-width: 0; }
 .hint { color: var(--muted); font-size: 12.5px; margin: 0; }
+.row-seats { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 6px 18px; }
+.row-seats .rs { display: flex; align-items: center; gap: 4px; }
+.row-seats .rs > span { flex: 1; min-width: 0; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row-seats input { width: 48px; text-align: center; }
+.row-seats button { padding: 2px 8px; }
 .label { font-size: 12.5px; color: var(--muted); }
 
 ul.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 360px; overflow: auto; }
@@ -366,11 +371,13 @@ dialog.help .help-foot { padding: 14px 18px 16px; color: var(--muted); font-size
           <label class="label" for="front">Tafel</label>
           <select id="front"><option value="top">oben</option><option value="bottom">unten</option></select>
         </div>
+        <div class="label">Plätze pro Reihe <span class="hint">(höchstens so viele wie Spalten)</span></div>
+        <div id="rowSeats" class="row-seats"></div>
         <div class="row">
           <button id="btnEditRoom">Tische bearbeiten</button>
           <button id="btnAllDesks" class="ghost">Alle Felder als Tische</button>
         </div>
-        <p class="hint" id="roomHint">Im Bearbeitungsmodus schaltet ein Klick ein Feld zwischen Tisch und leer (Gang, Säule, Lücke) um.</p>
+        <p class="hint" id="roomHint">„Plätze pro Reihe“ verteilt die Tische mittig in der Reihe – z. B. vorne weniger, hinten mehr. Für Gänge oder Lücken: im Bearbeitungsmodus schaltet ein Klick ein Feld zwischen Tisch und leer um.</p>
       </div>
     </details>
 
@@ -526,7 +533,7 @@ const Logic = (() => {
     return {
       version: 1,
       className: '',
-      grid: { rows: 5, cols: 6, front: 'top', empty: [] },
+      grid: { rows: 5, cols: 6, front: 'top', empty: [], shift: [] },
       tags: DEFAULT_TAGS.map(t => ({ ...t })),
       students: [],
       relations: [],
@@ -802,8 +809,40 @@ const Logic = (() => {
     s.grid.rows = rows;
     s.grid.cols = cols;
     s.grid.empty = s.grid.empty.filter(fits);
+    s.grid.shift = [];
     for (const k of Object.keys(s.seats)) if (!fits(k)) delete s.seats[k];
   }
+
+  /** Number of desks in grid row r. */
+  function rowSeatCount(s, r) {
+    let n = 0;
+    for (let c = 0; c < s.grid.cols; c++) if (isDesk(s, r, c)) n++;
+    return n;
+  }
+
+  /**
+   * Gives grid row r exactly n desks, centred in the row (any aisles in that row are replaced).
+   * When the free space is odd (e.g. 5 desks in 6 columns) the row is drawn shifted half a seat
+   * (grid.shift) so it still looks centred. Students on desks that disappear go back to the tray.
+   */
+  function setRowSeats(s, r, n) {
+    const cols = s.grid.cols;
+    if (r < 0 || r >= s.grid.rows) return;
+    n = clampInt(n, 0, cols, rowSeatCount(s, r));
+    const start = Math.floor((cols - n) / 2);
+    const empty = new Set(s.grid.empty);
+    for (let c = 0; c < cols; c++) {
+      const k = key(r, c);
+      if (c >= start && c < start + n) empty.delete(k);
+      else { empty.add(k); delete s.seats[k]; }
+    }
+    s.grid.empty = [...empty];
+    s.grid.shift = (s.grid.shift || []).filter(x => x !== r);
+    if (n > 0 && (cols - n) % 2) s.grid.shift.push(r);
+  }
+
+  /** Whether row r is drawn half a seat to the right. */
+  function isShifted(s, r) { return (s.grid.shift || []).includes(r); }
 
   /** Parses a pasted list: one name per line, strips numbering, skips blanks and duplicates. */
   function parseNameList(text, existingNames = []) {
@@ -835,6 +874,8 @@ const Logic = (() => {
     s.grid.rows = clampInt(g.rows, 1, MAX_GRID, 5);
     s.grid.cols = clampInt(g.cols, 1, MAX_GRID, 6);
     s.grid.front = g.front === 'bottom' ? 'bottom' : 'top';
+    s.grid.shift = [...new Set((Array.isArray(g.shift) ? g.shift : [])
+      .filter(r => Number.isInteger(r) && r >= 0 && r < s.grid.rows))];
     const validKey = k => typeof k === 'string' && /^\d+,\d+$/.test(k) && inBounds(s, ...Object.values(parseKey(k)));
     s.grid.empty = [...new Set((Array.isArray(g.empty) ? g.empty : []).filter(validKey))];
 
@@ -886,7 +927,7 @@ const Logic = (() => {
 
   return {
     MAX_GRID, MAX_DISTANCE, defaultState, key, parseKey, dist, rowFromFront, isDesk, deskKeys,
-    positions, evaluate, arrange, resizeGrid, parseNameList, normalize, distanceText, mulberry32,
+    positions, evaluate, arrange, resizeGrid, rowSeatCount, setRowSeats, isShifted, parseNameList, normalize, distanceText, mulberry32,
     ANIMALS, assignAnimals, rerollAnimals, cardOrder,
   };
 })();
@@ -983,6 +1024,7 @@ if (typeof module !== 'undefined') module.exports = Logic;
     commit(s => {
       if (s.grid.empty.includes(k)) s.grid.empty = s.grid.empty.filter(x => x !== k);
       else { s.grid.empty.push(k); delete s.seats[k]; }
+      s.grid.shift = (s.grid.shift || []).filter(x => x !== r);
     });
   }
 
@@ -1118,6 +1160,28 @@ if (typeof module !== 'undefined') module.exports = Logic;
     $('btnEditRoom').textContent = ui.editRoom ? 'Fertig' : 'Tische bearbeiten';
     $('btnEditRoom').className = ui.editRoom ? 'primary' : '';
     $('btnAllDesks').disabled = !state.grid.empty.length;
+    renderRowSeats();
+  }
+
+  /** One stepper per row, listed from the front, to set how many desks that row has. */
+  function renderRowSeats() {
+    const box = $('rowSeats');
+    const { rows, cols } = state.grid;
+    const items = [];
+    for (let f = 0; f < rows; f++) {
+      const r = state.grid.front === 'bottom' ? rows - 1 - f : f;
+      const n = L.rowSeatCount(state, r);
+      const set = v => commit(s => L.setRowSeats(s, r, v));
+      const label = `Reihe ${f + 1}` + (f === 0 ? ' (vorne)' : f === rows - 1 && rows > 1 ? ' (hinten)' : '');
+      items.push(h('div', { class: 'rs' },
+        h('span', null, label),
+        h('button', { class: 'icon', 'aria-label': `${label}: ein Platz weniger`, disabled: n <= 0, onclick: () => set(n - 1) }, '−'),
+        h('input', { type: 'number', min: 0, max: cols, value: n, 'aria-label': `Plätze in ${label}`,
+          onchange: e => set(e.target.value) }),
+        h('button', { class: 'icon', 'aria-label': `${label}: ein Platz mehr`, disabled: n >= cols, onclick: () => set(n + 1) }, '+'),
+      ));
+    }
+    box.replaceChildren(...items);
   }
 
   function renderTags() {
@@ -1186,22 +1250,28 @@ if (typeof module !== 'undefined') module.exports = Logic;
     const grid = $('grid');
     const partners = relationPartners(ui.selected);
     const empty = new Set(state.grid.empty);
-    grid.style.gridTemplateColumns = `repeat(${cols}, minmax(var(--cell-min, 70px), 1fr))`;
+    // Two half-columns per seat, so a row can sit half a seat to the right (centred odd rows).
+    grid.style.gridTemplateColumns = `repeat(${cols * 2}, minmax(calc(var(--cell-min, 70px) / 2 - 4px), 1fr))`;
     $('frontTop').hidden = front !== 'top';
     $('frontBottom').hidden = front !== 'bottom';
     $('room').classList.toggle('editing', ui.editRoom);
 
     const cells = [];
     for (let r = 0; r < rows; r++) {
+      // In edit mode rows are drawn unshifted, so every cell is clickable where it really is.
+      const shift = !ui.editRoom && L.isShifted(state, r) ? 1 : 0;
       for (let c = 0; c < cols; c++) {
         const k = L.key(r, c);
+        const place = `grid-row: ${r + 1}; grid-column: ${2 * c + 1 + shift} / span 2`;
         if (empty.has(k)) {
-          cells.push(h('div', { class: 'cell nodesk', onclick: ui.editRoom ? () => toggleDesk(r, c) : null }));
+          if (shift && c === cols - 1) continue; // would stick out on the right
+          cells.push(h('div', { class: 'cell nodesk', style: place, onclick: ui.editRoom ? () => toggleDesk(r, c) : null }));
           continue;
         }
         const st = studentById(state.seats[k]);
         const cell = h('div', {
           class: 'cell desk ' + (st ? 'has-student' : 'free'),
+          style: place,
           'aria-label': st ? `Platz Reihe ${L.rowFromFront(state, r) + 1}: ${st.name}` : `Freier Platz Reihe ${L.rowFromFront(state, r) + 1}`,
           onclick: () => {
             if (ui.editRoom) return toggleDesk(r, c);
@@ -1349,7 +1419,7 @@ if (typeof module !== 'undefined') module.exports = Logic;
   $('cols').addEventListener('change', applyGridSize);
   $('front').addEventListener('change', e => commit(s => { s.grid.front = e.target.value; }));
   $('btnEditRoom').addEventListener('click', () => { ui.editRoom = !ui.editRoom; render(); });
-  $('btnAllDesks').addEventListener('click', () => commit(s => { s.grid.empty = []; }));
+  $('btnAllDesks').addEventListener('click', () => commit(s => { s.grid.empty = []; s.grid.shift = []; }));
 
   $('formAddTag').addEventListener('submit', e => {
     e.preventDefault();

@@ -54,6 +54,23 @@ test('resizeGrid drops seats and empties outside the new bounds', () => {
   L.resizeGrid(s, 3, 3);
   eq(s.seats, { '0,0': 's0' }); eq(s.grid.empty, ['0,1']);
 });
+test('setRowSeats centres n desks in a row and unseats students on removed desks', () => {
+  const s = makeClass(2, 3, 6); s.seats = { '0,0': 's0', '0,3': 's1' }; s.grid.empty = ['1,2'];
+  L.setRowSeats(s, 0, 2);
+  eq(L.rowSeatCount(s, 0), 2); ok(L.isDesk(s, 0, 2) && L.isDesk(s, 0, 3), 'centred');
+  eq(s.seats, { '0,3': 's1' });
+  L.setRowSeats(s, 0, 99); eq(L.rowSeatCount(s, 0), 6, 'clamped to cols');
+  L.setRowSeats(s, 0, 0); eq(L.rowSeatCount(s, 0), 0); eq(s.seats, {});
+  eq(L.rowSeatCount(s, 1), 5, 'other rows untouched');
+});
+test('odd leftover space marks the row as shifted half a seat; even space does not', () => {
+  const s = makeClass(0, 2, 6);
+  L.setRowSeats(s, 0, 5); ok(L.isShifted(s, 0), '5 of 6 shifted');
+  L.setRowSeats(s, 0, 4); ok(!L.isShifted(s, 0), '4 of 6 not shifted');
+  L.setRowSeats(s, 1, 3); ok(L.isShifted(s, 1));
+  L.resizeGrid(s, 2, 7); ok(!L.isShifted(s, 1), 'resize clears shift');
+  eq(L.normalize({ ...s, grid: { ...s.grid, shift: [1, 9, 'x'] } }).grid.shift, [1]);
+});
 
 console.log('evaluate');
 test('conflict neighbours (incl. diagonal) are flagged', () => {

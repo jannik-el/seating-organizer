@@ -17,6 +17,8 @@ and can then fine-tune it by hand.
 
 - As a teacher, I can set the grid size (rows × columns) and mark individual cells as *desk* or
   *empty* (aisle, pillar, gap), so the grid matches my real room.
+- As a teacher, I can set **how many seats each row has** (e.g. fewer at the front, more at the
+  back); the desks are centred in the row and the column count is the maximum per row.
 - As a teacher, I can see which side is the front (board / teacher desk).
 - As a teacher, I can add students one at a time, or a whole class by pasting names (one per line).
 - As a teacher, I can tag a student with priorities (glasses, hearing, mobility/near door, …) and
